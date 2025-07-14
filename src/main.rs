@@ -3,10 +3,12 @@ use std::net::{TcpListener, TcpStream};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread::sleep;
 use std::time::Duration;
-use std::{fmt, result, thread};
+use std::{fmt, thread};
+use std::sync::{Arc, Mutex};
 
 use rand::Rng;
 use serde::Serialize;
+use threadpool::ThreadPool;
 
 const MAP_WIDTH: i32 = 20;
 const MAP_HEIGHT: i32 = 10;
@@ -84,21 +86,34 @@ fn main() {
     let listener: TcpListener =
         TcpListener::bind("localhost:3000").expect("Unable to bind port 3k");
 
-    println!("Listening on port 3k");
+    println!("Now listening to port 3000...");
+
+    let thread_pool = ThreadPool::new(11);
+    let data_mutex: Arc<Mutex<Receiver<Vec<Flight>>>> = Arc::new(Mutex::new(dat_rx));
 
     for stream_result in listener.incoming() {
+        let req_tx_clone = req_tx.clone();
+        let data_mutex_clone = data_mutex.clone();
+
         if let Ok(stream) = stream_result {
-            process_stream(stream, &req_tx, &dat_rx);
+            thread_pool.execute(move || {
+                process_stream(
+                    stream,
+                    &req_tx_clone,
+                    data_mutex_clone,
+                );
+            });
         }
     }
 
     handle.join().unwrap();
+
 }
 
 fn process_stream(
     mut stream: TcpStream,
     data_requester: &Sender<()>,
-    data_receiver: &Receiver<Vec<Flight>>,
+    data_receiver: Arc<Mutex<Receiver<Vec<Flight>>>> // &Receiver<Vec<Flight>>,
 ) {
     // println!("HTTP req received");
     let http_request = read_http_request(&mut stream);
@@ -172,11 +187,12 @@ let payload = match serialization_result {
 
 fn get_latest_traffic_data(
     data_requester: &Sender<()>,
-    data_receiver: &Receiver<Vec<Flight>>,
+    data_receiver: Arc<Mutex<Receiver<Vec<Flight>>>>,
 ) -> Option<Vec<Flight>> {
     data_requester.send(()).unwrap();
 
-    match data_receiver.recv_timeout(Duration::from_millis(3000)) {
+    match data_receiver.lock().unwrap()
+            .recv_timeout(Duration::from_millis(3000)) {
         Ok(data) => Some(data),
         _ => None,
     }
