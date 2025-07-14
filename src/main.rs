@@ -1,8 +1,8 @@
-use std::{fmt, thread};
+use std::{fmt, result, thread};
 use std::time::Duration;
-use std::io::{stdout, Write};
+use std::io::{stdout, BufReader, prelude::*, Write};
 use std::thread::sleep;
-use std::net::{Tcplistener, TcpStream};
+use std::net::{TcpListener, TcpStream};
 
 use rand::Rng;
 
@@ -69,10 +69,56 @@ fn main() {
     // other code to run...
 
     // REST API SERVER
-     
-    
+    let listener: TcpListener = TcpListener::bind("localhost:3000")
+            .expect("Unable to bind port 3k");
+
+    for stream_result in listener.incoming() {
+        if let Ok(stream) = stream_result{
+            process_stream(stream);
+        }
+    }
+
     handle.join().unwrap();
 
+}
+
+fn process_stream(mut stream: TcpStream){
+    // println!("HTTP req received");
+    let http_request =read_http_request(&mut stream);
+    send_http_respond(&mut stream);
+}
+
+fn read_http_request(stream: &mut TcpStream) -> Vec<String> {
+    let buf_reader = BufReader::new(stream);
+
+    let http_request: Vec<String> = buf_reader
+        .lines()
+        .map(|result| result.unwrap())
+        .take_while(|line| !line.is_empty())
+        .collect();
+
+    println!("Request: {:#?}", http_request);
+
+    http_request
+}
+
+fn send_http_respond(stream: &mut TcpStream) {
+    let respond_line: &str = "HTTP/1.1 200 OK";
+    let payload: &str = "<h1>Hello Client Application</h1>\r\n";
+    let content_length: usize = payload.len();
+    let content_type: &str = "text/html";
+
+    let headers: String = format!(
+        "Content-Length: {content_length}\r\n\
+         Access-Control-Allow-Origin: *\r\n\
+         Content-Type: {content_type}\r\n"
+    );
+
+    let http_response: String = format!(
+        "{respond_line}\r\n{headers}\r\n{payload}"
+    );
+
+    stream.write_all(http_response.as_bytes()).unwrap();
 }
 
 fn add_new_flight(data_set: & mut Vec<Flight>) {
